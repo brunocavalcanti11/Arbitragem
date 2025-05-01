@@ -8,6 +8,7 @@ import sys
 import os
 from datetime import datetime, timedelta
 import matplotlib.dates as mdates
+from streamlit_autorefresh import st_autorefresh
 
 # Configuração da página
 st.set_page_config(
@@ -15,6 +16,9 @@ st.set_page_config(
     page_icon="📈",
     layout="wide"
 )
+
+# Auto-refresh every 2 minutes (120000 milliseconds)
+st_autorefresh(interval=120000, key="data_refresh")
 
 # Título do dashboard
 st.title("Dashboard de Pair Trading com Cotação do Brent")
