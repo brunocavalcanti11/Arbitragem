@@ -17,8 +17,8 @@ st.set_page_config(
     layout="wide"
 )
 
-# Auto-refresh every 2 minutes (120000 milliseconds)
-st_autorefresh(interval=120000, key="data_refresh")
+# Auto-refresh every 5 minutes (300000 milliseconds)
+st_autorefresh(interval=300000, key="data_refresh")
 
 # Título do dashboard
 st.title("Dashboard de Pair Trading com Cotação do Brent")
