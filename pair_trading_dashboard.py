@@ -91,29 +91,47 @@ commodity_symbol = st.sidebar.selectbox(
 # Função para obter cotação atual
 @st.cache_data(ttl=300)  # Cache por 5 minutos
 def obter_cotacao(acao):
+    """Obtém a cotação atual de uma ação, com tratamento de erro para rate limit."""
     try:
         dados = yf.Ticker(acao)
-        preco_atual = dados.history(period='1d')['Close'].iloc[0]
+        # Tenta obter o preço mais recente (pega 2 dias para garantir que há dados)
+        hist = dados.history(period="2d") 
+        if hist.empty:
+            st.warning(f"Não foi possível obter cotação atual para {acao}. Pode ser um problema temporário ou limite de requisições. Tente atualizar mais tarde.")
+            return None
+        preco_atual = hist["Close"].iloc[-1] # Usar -1 para garantir o último disponível
         return preco_atual
     except Exception as e:
-        st.error(f"Erro ao obter cotação de {acao}: {e}")
+        # Verifica se o erro é relacionado a rate limit
+        error_msg = str(e).lower()
+        if "too many requests" in error_msg or "rate limited" in error_msg or "429" in error_msg:
+            st.warning(f"Limite de requisições atingido para cotação de {acao}. Tente atualizar novamente em alguns minutos.")
+        else:
+            # Outro erro
+            st.error(f"Erro ao obter cotação de {acao}: {e}")
         return None
 
 # Função para obter série histórica
 @st.cache_data(ttl=300)  # Cache por 5 minutos
 def obter_serie_historica(acao, periodo='1y'):
+    """Obtém a série histórica de uma ação usando yfinance, com tratamento de erro para rate limit."""
     try:
         # Obtém os dados históricos com preços ajustados para desdobramentos/bonificações
         ticker = yf.Ticker(acao)
         
-        # Se o período for 'Desde 2016', obtemos o máximo de dados e filtramos
-        if periodo == 'max':
+        # Se o período for 'max', obtemos o máximo de dados e filtramos
+        if periodo == 'max': # Use 'max' as string value for period
             dados = ticker.history(period=periodo, auto_adjust=True)
             # Filtra para dados a partir de 2016-01-01
             dados = dados.loc['2016-01-01':]
         else:
             dados = ticker.history(period=periodo, auto_adjust=True)
-        
+
+        # Verifica se os dados foram retornados (yfinance pode retornar vazio em caso de erro)
+        if dados.empty:
+            st.warning(f"Não foi possível obter dados históricos para {acao}. Pode ser um problema temporário ou limite de requisições. Tente atualizar mais tarde.")
+            return None
+            
         # Exibe informações sobre ações corporativas se disponíveis
         try:
             acoes_corporativas = ticker.actions
@@ -144,12 +162,20 @@ def obter_serie_historica(acao, periodo='1y'):
                             Por exemplo, um desdobramento de 2:1 significa que o preço da ação foi ajustado para metade
                             do valor para manter a consistência histórica.
                             """)
-        except Exception as e:
-            st.warning(f"Não foi possível obter ações corporativas para {acao}: {e}")
+        except Exception as e_actions:
+            # Silenciosamente ignora erros ao buscar ações corporativas, pois não são essenciais
+            pass
             
         return dados
+        
     except Exception as e:
-        st.error(f"Erro ao obter série histórica de {acao}: {e}")
+        # Verifica se o erro é relacionado a rate limit
+        error_msg = str(e).lower()
+        if "too many requests" in error_msg or "rate limited" in error_msg or "429" in error_msg:
+            st.warning(f"Limite de requisições atingido para dados históricos de {acao}. Tente atualizar novamente em alguns minutos.")
+        else:
+            # Outro erro
+            st.error(f"Erro ao obter série histórica de {acao}: {e}")
         return None
 
 # Exibir cotações atuais
