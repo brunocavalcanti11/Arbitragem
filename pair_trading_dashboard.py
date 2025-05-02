@@ -23,9 +23,14 @@ st.title("Dashboard de Pair Trading com Cotação do Brent")
 # Sidebar para configurações
 st.sidebar.header("Configurações")
 
+# Inicializa o estado da sessão se não existir
+if "first_load_done" not in st.session_state:
+    st.session_state.first_load_done = False
+
 # Botão de atualização manual
 if st.sidebar.button("🔄 Atualizar Dados"):
-    st.cache_data.clear()
+    st.cache_data.clear() # Limpa o cache para buscar dados novos
+    st.session_state.first_load_done = True # Marca que o botão foi clicado
     st.rerun()
 
 st.sidebar.markdown("--- ") # Separador
@@ -178,143 +183,164 @@ def obter_serie_historica(acao, periodo='1y'):
             st.error(f"Erro ao obter série histórica de {acao}: {e}")
         return None
 
-# Exibir cotações atuais
-if acoes_selecionadas:
-    st.subheader("Cotações Atuais")
-    
-    # Criar colunas para exibir as cotações
-    cols = st.columns(len(acoes_selecionadas) + 1)  # +1 para a commodity
-    
-    # Exibir cotações das ações selecionadas
-    for i, acao in enumerate(acoes_selecionadas):
-        preco = obter_cotacao(acao)
-        if preco is not None:
-            cols[i].metric(label=acao, value=f"R$ {preco:.2f}")
-    
-    # Exibir cotação da commodity
-    commodity_preco = obter_cotacao(commodity_symbol)
-    if commodity_preco is not None:
-        cols[-1].metric(label=f"{commodity_symbol}", value=f"US$ {commodity_preco:.2f}")
+# --- Lógica Principal --- 
+# Só executa a lógica principal se o botão de atualização já foi clicado uma vez
+if st.session_state.first_load_done:
+    # Exibir cotações atuais
+    if acoes_selecionadas:
+        st.subheader("Cotações Atuais")
 
-# Análise de Pair Trading
-if len(acoes_selecionadas) == 2:
-    st.subheader(f"Análise de Pair Trading: {acoes_selecionadas[0]} vs {acoes_selecionadas[1]}")
-    
-    # Obter séries históricas
-    serie_acao1 = obter_serie_historica(acoes_selecionadas[0], periodo=periodo_valor)
-    serie_acao2 = obter_serie_historica(acoes_selecionadas[1], periodo=periodo_valor)
-    serie_brent = obter_serie_historica(commodity_symbol, periodo=periodo_valor)
-    
-    if serie_acao1 is not None and serie_acao2 is not None and serie_brent is not None:
-        # Calcular o ratio entre as ações usando preços ajustados para desdobramentos
-        # Os preços já estão ajustados pelo parâmetro auto_adjust=True na função obter_serie_historica
-        ratio = serie_acao1['Close'] / serie_acao2['Close']
-        
-        # Adicionar informação sobre o ratio ajustado com foco em desdobramentos
+        # Criar colunas para exibir as cotações
+        cols = st.columns(len(acoes_selecionadas) + 1)  # +1 para a commodity
+
+        # Exibir cotações das ações selecionadas
+        cotacoes_ok = True # Resetar flag a cada atualização
+        for i, acao in enumerate(acoes_selecionadas):
+            preco = obter_cotacao(acao)
+            if preco is None:
+                cotacoes_ok = False # Marca se alguma cotação falhou
+                # Mensagem de erro já é exibida por obter_cotacao
+                cols[i].metric(label=acao, value="Erro")
+            else:
+                # Ajuste para exibir moeda correta (R$ para .SA)
+                currency_prefix_stock = "R$" if ".SA" in acao else "$" 
+                cols[i].metric(label=acao, value=f"{currency_prefix_stock} {preco:.2f}")
+
+        # Exibir cotação da commodity
+        commodity_preco = obter_cotacao(commodity_symbol)
+        if commodity_preco is None:
+            cotacoes_ok = False # Marca se a cotação da commodity falhou
+            # Mensagem de erro já é exibida por obter_cotacao
+            cols[len(acoes_selecionadas)].metric(label=commodity_symbol, value="Erro")
+        else:
+            # Determina a moeda com base no símbolo (simplificado)
+            # Assumindo que todos os ETFs listados são USD
+            currency_prefix_comm = "US$" 
+            cols[len(acoes_selecionadas)].metric(label=commodity_symbol, value=f"{currency_prefix_comm} {commodity_preco:.2f}")
+
+    # Análise de Pair Trading
+    if len(acoes_selecionadas) == 2 and cotacoes_ok: # Só prossegue se as cotações foram obtidas
+        st.subheader(f"Análise de Pair Trading: {acoes_selecionadas[0]} vs {acoes_selecionadas[1]}")
+
+        # Nota sobre o cálculo do ratio
         st.info("""
-        **Nota sobre o cálculo do ratio:** 
-        O ratio é calculado usando preços ajustados para desdobramentos desde 2016.
-        Isso garante que a análise leva em conta todas as mudanças na estrutura de capital das empresas,
+        **Nota sobre o cálculo do ratio:** O ratio é calculado usando preços ajustados para desdobramentos desde 2016. 
+        Isso garante que a análise leva em conta todas as mudanças na estrutura de capital das empresas, 
         especialmente os desdobramentos (stock splits) que afetam diretamente a quantidade de ações.
         
         Os desdobramentos são destacados na barra lateral para cada ativo.
         """)
-        
-        # Calcular o z-score do ratio
-        z_score = zscore(ratio)
-        
-        # Calcular a média e o desvio padrão do ratio
-        media_ratio = ratio.mean()
-        desvio_padrao_ratio = ratio.std()
-        
-        # Exibir estatísticas
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Ratio Atual", f"{ratio.iloc[-1]:.4f}")
-        col2.metric("Z-Score Atual", f"{z_score[-1]:.4f}")
-        
-        # Tomada de decisão com base nos limites do z-score
-        if z_score[-1] > limite_superior_zscore:
-            decisao = "Sinal de Venda"
-        elif z_score[-1] < limite_inferior_zscore:
-            decisao = "Sinal de Compra"
+
+        # Obter séries históricas
+        serie_acao1 = obter_serie_historica(acoes_selecionadas[0], periodo=periodo_valor)
+        serie_acao2 = obter_serie_historica(acoes_selecionadas[1], periodo=periodo_valor)
+        serie_commodity = obter_serie_historica(commodity_symbol, periodo=periodo_valor)
+
+        if serie_acao1 is not None and serie_acao2 is not None and serie_commodity is not None:
+            # Alinhar as séries temporais (usando interseção dos índices)
+            common_index = serie_acao1.index.intersection(serie_acao2.index).intersection(serie_commodity.index)
+            serie_acao1 = serie_acao1.loc[common_index]
+            serie_acao2 = serie_acao2.loc[common_index]
+            serie_commodity = serie_commodity.loc[common_index]
+
+            if not common_index.empty:
+                # Calcular o ratio entre as ações (usando preços ajustados)
+                ratio = serie_acao1["Close"] / serie_acao2["Close"]
+
+                # Calcular Z-score do ratio
+                z_score_ratio = zscore(ratio)
+
+                # Calcular média e desvios padrão do ratio
+                media_ratio = ratio.mean()
+                std_ratio = ratio.std()
+                limite_superior = media_ratio + limite_superior_zscore * std_ratio
+                limite_inferior = media_ratio + limite_inferior_zscore * std_ratio
+
+                # Exibir métricas atuais
+                ratio_atual = ratio.iloc[-1]
+                z_score_atual = z_score_ratio[-1]
+
+                # Determinar sinal
+                sinal = "Neutro"
+                if z_score_atual > limite_superior_zscore:
+                    sinal = f"Vender {acoes_selecionadas[0]} / Comprar {acoes_selecionadas[1]}"
+                elif z_score_atual < limite_inferior_zscore:
+                    sinal = f"Comprar {acoes_selecionadas[0]} / Vender {acoes_selecionadas[1]}"
+
+                col1, col2, col3 = st.columns(3)
+                col1.metric("Ratio Atual", f"{ratio_atual:.4f}")
+                col2.metric("Z-Score Atual", f"{z_score_atual:.4f}")
+                col3.metric("Sinal", sinal)
+
+                # Plotar o gráfico
+                st.subheader(f"Ratio entre {acoes_selecionadas[0]} e {acoes_selecionadas[1]} com {commodity_symbol} - {periodo_selecionado}") # Usar periodo_selecionado para o texto
+                fig, ax1 = plt.subplots(figsize=(12, 6))
+
+                # Eixo esquerdo para o Ratio
+                color = "tab:blue"
+                ax1.set_xlabel("Data")
+                ax1.set_ylabel("Ratio", color=color)
+                ax1.plot(ratio.index, ratio, label="Ratio", color=color)
+                ax1.axhline(media_ratio, color="gray", linestyle="--", label="Média")
+                ax1.axhline(limite_superior, color="red", linestyle="--", label=f"+{limite_superior_zscore:.1f} Desvios Padrões")
+                ax1.axhline(limite_inferior, color="green", linestyle="--", label=f"-{abs(limite_inferior_zscore):.1f} Desvios Padrões") # Use abs() for negative limit label
+                ax1.tick_params(axis="y", labelcolor=color)
+                ax1.legend(loc="upper left")
+                ax1.grid(True)
+
+                # Eixo direito para a Commodity
+                ax2 = ax1.twinx()  # instantiate a second axes that shares the same x-axis
+                color = "tab:orange"
+                ax2.set_ylabel(f"{commodity_symbol} (Preço)", color=color)  # we already handled the x-label with ax1
+                ax2.plot(serie_commodity.index, serie_commodity["Close"], label=commodity_symbol, color=color, alpha=0.7)
+                ax2.tick_params(axis="y", labelcolor=color)
+                ax2.legend(loc="upper right")
+
+                fig.tight_layout()  # otherwise the right y-label is slightly clipped
+
+                # Formatar eixo X para mostrar datas de forma legível
+                ax1.xaxis.set_major_locator(mdates.AutoDateLocator())
+                ax1.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m-%d"))
+                plt.setp(ax1.get_xticklabels(), rotation=45, ha="right")
+
+                st.pyplot(fig)
+
+                # Tabela de dados históricos
+                st.subheader("Dados Históricos")
+                dados_tabela = pd.DataFrame({
+                    f"{acoes_selecionadas[0]}": serie_acao1["Close"],
+                    f"{acoes_selecionadas[1]}": serie_acao2["Close"],
+                    "Ratio": ratio,
+                    "Z-Score": z_score_ratio,
+                    f"{commodity_symbol}": serie_commodity["Close"]
+                })
+                st.dataframe(dados_tabela)
+
+                # Botão de download CSV
+                @st.cache_data
+                def convert_df_to_csv(df):
+                    return df.to_csv(index=True).encode("utf-8")
+
+                csv = convert_df_to_csv(dados_tabela)
+                st.download_button(
+                    label="Download dados como CSV",
+                    data=csv,
+                    file_name=f"pair_trading_{acoes_selecionadas[0]}_{acoes_selecionadas[1]}_{periodo_selecionado}.csv", # Usar periodo_selecionado
+                    mime="text/csv",
+                )
+            else:
+                st.warning("Não há dados comuns suficientes no período selecionado para as ações e commodity.")
         else:
-            decisao = "Neutro"
-        
-        col3.metric("Sinal", decisao)
-        
-        # Criar figura para o gráfico
-        fig, ax1 = plt.subplots(figsize=(12, 8))
-        
-        # Plotar o ratio
-        ax1.plot(ratio.index, ratio.values, label='Ratio', color='blue')
-        ax1.axhline(y=media_ratio, color='green', linestyle='-', label='Média')
-        ax1.axhline(y=media_ratio + limite_superior_zscore * desvio_padrao_ratio, color='red', linestyle='--', 
-                   label=f'+{limite_superior_zscore} Desvios Padrões')
-        ax1.axhline(y=media_ratio - limite_superior_zscore * desvio_padrao_ratio, color='red', linestyle='--', 
-                   label=f'-{limite_superior_zscore} Desvios Padrões')
-        
-        # Configurar eixo Y primário (ratio)
-        ax1.set_xlabel('Data')
-        ax1.set_ylabel('Ratio', color='blue')
-        ax1.tick_params(axis='y', labelcolor='blue')
-        
-        # Criar eixo Y secundário para a commodity
-        ax2 = ax1.twinx()
-        ax2.plot(serie_brent.index, serie_brent['Close'], color='orange', linestyle='-.', label=commodity_symbol)
-        ax2.set_ylabel(f'Preço de {commodity_symbol} (USD)', color='orange')
-        ax2.tick_params(axis='y', labelcolor='orange')
-        
-        # Configurar título e legenda
-        plt.title(f'Ratio entre {acoes_selecionadas[0]} e {acoes_selecionadas[1]} com {commodity_symbol} - {periodo_selecionado}')
-        
-        # Combinar legendas dos dois eixos
-        lines1, labels1 = ax1.get_legend_handles_labels()
-        lines2, labels2 = ax2.get_legend_handles_labels()
-        ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper left')
-        
-        # Formatar datas no eixo X
-        ax1.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
-        plt.xticks(rotation=45)
-        
-        # Ajustar layout
-        plt.tight_layout()
-        
-        # Exibir o gráfico no Streamlit
-        st.pyplot(fig)
-        
-        # Exibir tabela de dados
-        st.subheader("Dados Históricos")
-        
-        # Criar DataFrame combinado - garantindo que todos os índices estejam alinhados
-        # Primeiro, criamos um índice comum usando a interseção dos índices
-        idx_comum = serie_acao1.index.intersection(serie_acao2.index).intersection(serie_brent.index)
-        
-        # Agora criamos o DataFrame usando apenas os dados com o índice comum
-        df_combinado = pd.DataFrame({
-            f"{acoes_selecionadas[0]} (Fechamento)": serie_acao1.loc[idx_comum, 'Close'],
-            f"{acoes_selecionadas[1]} (Fechamento)": serie_acao2.loc[idx_comum, 'Close'],
-            "Ratio": ratio.loc[idx_comum],
-            "Z-Score": pd.Series(zscore(ratio.loc[idx_comum]), index=idx_comum),
-            f"{commodity_symbol} (USD)": serie_brent.loc[idx_comum, 'Close']
-        })
-        
-        # Exibir os últimos 10 registros
-        st.dataframe(df_combinado.tail(10))
-        
-        # Opção para download dos dados
-        csv = df_combinado.to_csv().encode('utf-8')
-        st.download_button(
-            label="Download dos dados em CSV",
-            data=csv,
-            file_name=f"pair_trading_{acoes_selecionadas[0]}_{acoes_selecionadas[1]}_{periodo_valor}.csv",
-            mime="text/csv",
-        )
-    else:
-        st.error("Não foi possível obter os dados históricos para as ações selecionadas ou para o Brent.")
-elif len(acoes_selecionadas) == 1:
-    st.info("Selecione duas ações para realizar a análise de pair trading.")
+            # Mensagens de erro/aviso já foram exibidas pelas funções de obtenção de dados
+            st.error("Não foi possível realizar a análise devido a erros na obtenção dos dados. Verifique os avisos acima.")
+
+    elif len(acoes_selecionadas) != 2 and cotacoes_ok: # Adicionado cotacoes_ok aqui também
+        st.warning("Por favor, selecione exatamente duas ações para análise de pair trading.")
+    # Se cotacoes_ok for False, as mensagens de erro já foram exibidas na seção de cotações
+
 else:
-    st.info("Selecione ações para começar a análise.")
+    # Mensagem exibida antes do primeiro clique no botão
+    st.info("📈 Por favor, clique no botão '🔄 Atualizar Dados' na barra lateral para carregar as informações.")
 
 # Informações adicionais
 st.sidebar.markdown("---")
@@ -323,3 +349,4 @@ st.sidebar.info("""
 Este dashboard permite analisar estratégias de pair trading entre ações de bancos e Petrobras da Bovespa, 
 incluindo a cotação do petróleo Brent como referência adicional.
 """)
+
