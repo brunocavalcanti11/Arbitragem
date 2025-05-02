@@ -9,7 +9,6 @@ import os
 from datetime import datetime, timedelta
 import matplotlib.dates as mdates
 
-
 # Configuração da página
 st.set_page_config(
     page_title="Dashboard de Pair Trading com Brent",
@@ -22,13 +21,6 @@ st.title("Dashboard de Pair Trading com Cotação do Brent")
 
 # Sidebar para configurações
 st.sidebar.header("Configurações")
-
-# Botão de atualização manual
-if st.sidebar.button("🔄 Atualizar Dados"):
-    st.cache_data.clear()
-    st.rerun()
-
-st.sidebar.markdown("--- ") # Separador
 
 # Lista de ações disponíveis (bancos e Petrobras da Bovespa)
 acoes_disponiveis = {
